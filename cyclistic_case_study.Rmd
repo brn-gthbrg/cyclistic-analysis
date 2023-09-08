@@ -1,0 +1,199 @@
+---
+title: "Cyclistic Case Study"
+date: "March 20, 2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Business Objective
+__Find answers to the following questions:__ How do annual members and casual riders use Cyclistic bikes differently? Why would casual rider buy Cyclistic annual memberships? How can Cyclistic use digital media to influence casual riders to become members?
+
+__Primary stakeholder:__ Lily Moreno, Director of Marketing
+Secondary stakeholders: Cyclistic Executive Team
+
+#### Available data
+[Cyclistic provided data](https://divvy-tripdata.s3.amazonaws.com/index.html)
+- We will look at all 2022 trip data.
+
+## Collect and clean the data
+
+#### Cleaning Log
+* Download Cyclistic all trip data from 2022. (This is gathered from 12 separate CSV files.)
+* Rename 202209-divvy-publictripdata.csv to 202209-divvy-tripdata.csv to match other filenames
+* Remove any potential duplicates in ride_id, primary unique ID field
+* Remove any entries with NA values
+* Remove rows that contain NA values for missing station data
+
+```{r}
+library(data.table)
+library(tidyverse)
+library(dplyr)
+library(stringr)
+library(data.table)
+library("lubridate")
+library(ggplot2)
+```
+
+Read each CSV file
+```{r}
+trips_03_2022 <- fread("~/cyclistic_2022/202203-divvy-tripdata.csv")
+trips_02_2022 <- fread("~/cyclistic_2022/202202-divvy-tripdata.csv")
+trips_01_2022 <- fread("~/cyclistic_2022/202201-divvy-tripdata.csv")
+trips_04_2022 <- fread("~/cyclistic_2022/202204-divvy-tripdata.csv")
+trips_05_2022 <- fread("~/cyclistic_2022/202205-divvy-tripdata.csv")
+trips_06_2022 <- fread("~/cyclistic_2022/202206-divvy-tripdata.csv")
+trips_07_2022 <- fread("~/cyclistic_2022/202207-divvy-tripdata.csv")
+trips_08_2022 <- fread("~/cyclistic_2022/202208-divvy-tripdata.csv")
+trips_09_2022 <- fread("~/cyclistic_2022/202209-divvy-tripdata.csv")
+trips_10_2022 <- fread("~/cyclistic_2022/202210-divvy-tripdata.csv")
+trips_11_2022 <- fread("~/cyclistic_2022/202211-divvy-tripdata.csv")
+trips_12_2022 <- fread("~/cyclistic_2022/202212-divvy-tripdata.csv")
+```
+
+Each CSV file has 13 variables. Check that all variables are in the right order and have the same format using the glimpse function on each file (January data is shown as an example.)
+```{r}
+glimpse(trips_01_2022)
+```
+  
+Create a single dataset using rbind function.
+```{r}
+cyclistic_trips_2022 <- rbind(trips_01_2022,
+                              trips_02_2022,
+                              trips_03_2022,
+                              trips_04_2022,
+                              trips_05_2022,
+                              trips_06_2022,
+                              trips_07_2022,
+                              trips_08_2022,
+                              trips_09_2022,
+                              trips_10_2022,
+                              trips_11_2022,
+                              trips_12_2022)
+```
+
+Eliminate any potential duplicates in ride_id. This is primary unique ID.
+```{r}
+cyclistic_trips_2022 %>%
+  distinct(ride_id, .keep_all = TRUE)
+```
+
+
+Find and remove any entries with NA values
+```{r}
+sapply(cyclistic_trips_2022, function(x) sum(is.na(x)))
+# Entries with NA value for end_lat and end_lng found. All end station data is also blank.
+na_rows <- subset(cyclistic_trips_2022, is.na(cyclistic_trips_2022$end_lat))
+# Remove entries with NA values
+cyclistic_trips_2022_clean <- na.omit(cyclistic_trips_2022)
+```
+
+Check for any possible unexpected results in category columns. Confirm "casual" and "member" are the only two options in the member_casual column
+```{r}
+unique(cyclistic_trips_2022_clean$member_casual)
+```
+
+See all rideable type options
+
+```{r}
+unique(cyclistic_trips_2022_clean$rideable_type)
+```
+
+## Prepare data for analysis
+Create ride_length column that shows time elapsed between when the ride started and ended.
+```{r}
+cyclistic_trips_2022_clean$ride_length <- difftime(cyclistic_trips_2022_clean$ended_at, cyclistic_trips_2022_clean$started_at)
+range(cyclistic_trips_2022_clean$ride_length)
+```
+
+Convert ride_length into hours and minutes
+```{r}
+cyclistic_trips_2022_clean = cyclistic_trips_2022_clean %>%
+  mutate(hours = hour(seconds_to_period(cyclistic_trips_2022_clean$ride_length)),
+         minutes = minute(seconds_to_period(cyclistic_trips_2022_clean$ride_length)),)
+```
+Add date, month, and day of the week columns
+```{r}
+cyclistic_trips_2022_clean$date <- as.Date(cyclistic_trips_2022_clean$started_at)
+cyclistic_trips_2022_clean$month <- format(as.Date(cyclistic_trips_2022_clean$date), "%m")
+cyclistic_trips_2022_clean$day_of_week <- format(as.Date(cyclistic_trips_2022_clean$date), "%A")
+```
+
+Remove entries with a negative trip lengths and all docked bikes. Docked bikes have been taken out of circulation so we remove them from our analysis.
+```{r}
+trip_data = cyclistic_trips_2022_clean[!(cyclistic_trips_2022_clean$rideable_type == "docked_bike" | cyclistic_trips_2022_clean$ride_length<0),]
+```
+Remove any rows with empty string for the start_station_name, end station, or trip id
+```{r}
+
+trip_data = trip_data[!trip_data$ride_id=="",]
+trip_data = trip_data[!trip_data$start_station_name=="",]
+trip_data = trip_data[!trip_data$end_station_name=="",]
+```
+
+## Analyze the data
+```{r}
+trip_data$day_of_week <- factor(trip_data$day_of_week, levels = c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday","Saturday", "Sunday"))
+
+#Average ride length vs. day of the week
+trip_data %>%
+  group_by(member_casual, day_of_week) %>%
+  summarise(average_duration = mean(minutes), .groups = "drop") %>%
+  ggplot(aes(x = day_of_week, y = average_duration, fill = member_casual)) +
+    geom_col(width = 0.4, position = position_dodge(width = 0.5)) +
+  labs(title = "Average ride length vs. day of the week", x = 'Day of Week', y = 'Average Trip Duration')
+#Total Ride Count vs. day of the week
+trip_data %>%
+  group_by(member_casual, day_of_week) %>%
+  summarise(number_of_rides = n(), .groups = "drop") %>%
+  ggplot(aes(x = day_of_week, y = format(number_of_rides, scientific = FALSE), fill = member_casual)) +
+  geom_col(width = 0.4, position = position_dodge(width = 0.5)) +
+  labs(title = "Total Ride Count vs. day of the week", x = 'Day of Week', y = 'Total Rides')
+```
+
+```{r}
+# AVG by month
+trip_data %>%
+  group_by(member_casual, month) %>%
+  summarise(average_duration = mean(minutes), .groups = "drop") %>%
+  ggplot(aes(x = month, y = average_duration, fill = member_casual)) +
+  geom_col(width = 0.4, position = position_dodge(width = 0.5)) +
+  labs(title = "Average ride length vs. Month", x = 'Month', y = 'Average Trip Duration')
+# Total by month
+trip_data %>%
+  group_by(member_casual, month) %>%
+  summarise(number_of_rides = n(), .groups = "drop") %>%
+  ggplot(aes(x = month, y = format(number_of_rides, scientific = FALSE), fill = member_casual)) +
+  geom_col(width = 0.4, position = position_dodge(width = 0.5)) +
+  labs(title = "Total Ride Count vs. Month", x = 'Month', y = 'Total Rides')
+```
+
+```{r}
+#Find top 5 start stations by ride count for members and casual customers
+station_rides_count <- trip_data %>% group_by(start_station_name, member_casual) %>%
+  summarise(total_count=n(), .groups='drop') %>%
+  as.data.frame()
+
+top_stations <- station_rides_count %>%                                      # Top N highest values by group
+  arrange(desc(total_count)) %>% 
+  group_by(member_casual) %>%
+  slice(1:5)
+top_stations
+```
+
+## Conclusions
+#### Differences between the bike usage of annual members and casual riders:
+- Casual riders rent bikes less often but for longer durations.
+- Casual riders use bikes at a higher rate on weekends while members have higher rentals on weekdays
+- Bike usage increases through spring and peaks during the summer months
+
+#### Why would casual riders buy Cyclistic annual memberships?
+- Casual users seem to use the bikes more for leisure, based on higher rentals on weekends. Cyclistic should consider marketing the benefits of bike commuting to convert more casual riders into members.
+
+#### How can Cyclistic use digital media to inﬂuence casual riders to become members?
+- Target marketing campaigns towards neighborhoods surrounding rental stations with highest casual rider usage.
+- Promote the benefits of bike commuting, examples are: improved health, environmentally friendly, cost effective transportation 
+- Use geo-targeted ads to help casual riders find their ideal stations to begin and end their commutes.
